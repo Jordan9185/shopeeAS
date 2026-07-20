@@ -41,7 +41,7 @@ export function buildItemFlex(
     {
       type: "text",
       text: `$${formatPrice(item.currentPrice)}`,
-      size: "xxl",
+      size: "xl",
       weight: "bold",
       color: SHOPEE_ORANGE,
       flex: 0,
@@ -76,17 +76,22 @@ export function buildItemFlex(
     altText: `${item.title} — $${formatPrice(item.currentPrice)}`,
     contents: {
       type: "bubble",
+      // kilo 比預設的 mega 窄一級，在群組裡不會佔掉整個畫面寬度
+      size: "kilo",
       hero: {
         type: "image",
         url: item.imageUrl,
         size: "full",
-        aspectRatio: "1:1",
+        // 用 20:13 而非 1:1。正方形圖在手機上很吃高度，
+        // 而商品縮圖的重點是辨識，不需要完整呈現整張圖
+        aspectRatio: "20:13",
         aspectMode: "cover",
       },
       body: {
         type: "box",
         layout: "vertical",
-        spacing: "md",
+        spacing: "sm",
+        paddingAll: "12px",
         contents: [
           {
             type: "text",
@@ -114,6 +119,8 @@ export function buildItemFlex(
       footer: {
         type: "box",
         layout: "vertical",
+        paddingAll: "12px",
+        paddingTop: "0px",
         contents: [
           {
             type: "button",
