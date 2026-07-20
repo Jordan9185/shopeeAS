@@ -25,3 +25,4 @@ coverage/
 # 系統
 .DS_Store
 *.log
+.env*
