@@ -1,11 +1,12 @@
-import { recordObservation } from "@/lib/db/items"
+import { recordObservation } from "@/lib/db/products"
 import { replyMessage } from "@/lib/line/client"
-import { buildCarousel, buildItemFlex } from "@/lib/line/flex"
+import { buildCarousel, buildItemFlex, type CardEntry } from "@/lib/line/flex"
 import { extractMentionQuery } from "@/lib/line/mention"
 import { isTextMessageEvent, type LineWebhookBody, type LineWebhookEvent } from "@/lib/line/types"
 import { verifyLineSignature } from "@/lib/line/verify"
-import { buildShopeeUrl, getShopeeProvider } from "@/lib/shopee/provider"
-import { resolveShopeeIdsFromText } from "@/lib/shopee/url"
+import { allProviders } from "@/lib/platforms/registry"
+import { resolveProductFromText } from "@/lib/platforms/resolve"
+import type { AffiliateProvider, Product } from "@/lib/platforms/types"
 
 // node:crypto 需要 Node runtime，不能跑在 Edge
 export const runtime = "nodejs"
@@ -56,31 +57,38 @@ async function handleEvent(event: LineWebhookEvent): Promise<void> {
       return
     }
 
-    // 分支二：訊息含蝦皮商品連結 → 單張商品卡
-    const ids = await resolveShopeeIdsFromText(event.message.text)
-    // 兩者皆非——靜默略過。
-    // 群組中話多的機器人會被踢，寧可少回也不要洗頻。
-    if (!ids) return
-
-    const provider = getShopeeProvider()
-    const item = await provider.getItem(ids.shopId, ids.itemId)
-    if (!item) {
-      console.warn(`[webhook] 查不到商品 shop=${ids.shopId} item=${ids.itemId}`)
-      return
-    }
-
-    // 寫入觀測紀錄並取得比價判定
-    const verdict = await recordObservation(item)
-
-    // 分潤連結失敗時 provider 會退回原始網址，使用者至少拿得到能用的連結
-    const originalUrl = buildShopeeUrl(item.shopId, item.itemId)
-    const affiliateUrl = await provider.generateAffiliateLink(originalUrl)
-
-    await replyMessage(event.replyToken, [buildItemFlex(item, verdict, affiliateUrl)])
+    // 分支二：訊息含商品連結 → 單張商品卡
+    await handleProductLink(event.replyToken, event.message.text)
   } catch (error) {
     // 這裡吞掉例外是刻意的：單一事件失敗不該讓整個 webhook 回 500
     console.error("[webhook] 處理事件時發生錯誤:", error)
   }
+}
+
+/** 把商品組成卡片所需的資料：寫入觀測紀錄並產生分潤連結 */
+async function toCardEntry(provider: AffiliateProvider, product: Product): Promise<CardEntry> {
+  return {
+    product,
+    verdict: await recordObservation(product),
+    affiliateUrl: await provider.generateAffiliateLink(product.productUrl),
+    platform: { displayName: provider.displayName, brandColor: provider.brandColor },
+  }
+}
+
+async function handleProductLink(replyToken: string, text: string): Promise<void> {
+  const resolved = await resolveProductFromText(text)
+  // 訊息裡沒有任何平台認得的商品連結——靜默略過。
+  // 群組中話多的機器人會被踢，寧可少回也不要洗頻。
+  if (!resolved) return
+
+  const { provider, externalId } = resolved
+  const product = await provider.getProduct(externalId)
+  if (!product) {
+    console.warn(`[webhook] 查不到商品 platform=${provider.platform} id=${externalId}`)
+    return
+  }
+
+  await replyMessage(replyToken, [buildItemFlex(await toCardEntry(provider, product))])
 }
 
 /** 一次搜尋回傳幾筆商品 */
@@ -99,22 +107,19 @@ async function handleSearch(replyToken: string, query: string): Promise<void> {
     return
   }
 
-  const provider = getShopeeProvider()
-  const items = await provider.searchItems(query, SEARCH_LIMIT)
+  // 向所有啟用中的平台搜尋，結果合併呈現
+  const perPlatform = await Promise.all(
+    allProviders().map(async (provider) => {
+      const products = await provider.searchProducts(query, SEARCH_LIMIT)
+      return Promise.all(products.map((product) => toCardEntry(provider, product)))
+    })
+  )
+  const entries = perPlatform.flat()
 
-  if (items.length === 0) {
+  if (entries.length === 0) {
     await replyMessage(replyToken, [{ type: "text", text: `找不到「${query}」的相關商品` }])
     return
   }
-
-  // 每筆結果都記錄觀測，讓之後有人貼這些商品的連結時已有價格歷史
-  const entries = await Promise.all(
-    items.map(async (item) => ({
-      item,
-      verdict: await recordObservation(item),
-      affiliateUrl: await provider.generateAffiliateLink(buildShopeeUrl(item.shopId, item.itemId)),
-    }))
-  )
 
   await replyMessage(replyToken, [buildCarousel(entries, query)])
 }

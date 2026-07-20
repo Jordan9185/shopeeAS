@@ -1,12 +1,19 @@
-import { discountPercent, formatPrice, type PriceVerdict } from "@/lib/shopee/price"
-import type { ShopeeItem } from "@/lib/shopee/types"
+import type { Product } from "@/lib/platforms/types"
+import { discountPercent, formatPrice, type PriceVerdict } from "@/lib/pricing/price"
 import type { LineMessage } from "./client"
 
-// 刻意不使用蝦皮品牌橘。高飽和的橘色會讓卡片看起來像廣告，
-// 中性的深藍灰更像「資訊卡片」，由使用者自行判斷要不要買。
+// 卡片本身刻意保持中性配色。平台品牌色只用在頂部的小標籤點綴——
+// 整張卡片套用電商的品牌色會有兩個問題：看起來像廣告，
+// 以及讓人誤以為這是該平台官方發出的訊息。
 const TEXT_PRIMARY = "#1F2933"
 const TEXT_MUTED = "#7B8794"
 const BUTTON_COLOR = "#3E4C59"
+
+/** 卡片上需要的平台資訊。只取用到的欄位，不依賴整個 provider */
+export type PlatformBadge = {
+  displayName: string
+  brandColor: string
+}
 
 type Badge = { text: string; color: string }
 
@@ -14,11 +21,9 @@ type Badge = { text: string; color: string }
  * 依比價結果決定標籤文字與顏色。
  *
  * 文案原則：只陳述觀測到的事實，不做價值判斷、不催促。
- * 「目前是觀測以來的最低價」是事實；「🔥 歷史新低！快搶」是推銷。
- * 後者會讓使用者感覺被推著走，長期反而損害信任。
  *
  * 措辭一律加上「觀測以來」的限定，因為本系統只看得到自己記錄過的價格，
- * 不等於這個商品真正的歷史最低價——不加限定就是誇大。
+ * 不等於商品真正的歷史最低價——不加限定就是誇大。
  */
 function badgeFor(verdict: PriceVerdict): Badge {
   switch (verdict.kind) {
@@ -39,13 +44,16 @@ function badgeFor(verdict: PriceVerdict): Badge {
 /** LINE Carousel 上限為 12 個 bubble，但太多會讓使用者滑不完 */
 const MAX_CAROUSEL_ITEMS = 10
 
-/**
- * 把多個商品組成可左右滑動的 Carousel。
- *
- * @param entries 每筆包含商品、比價判定與分潤連結
- */
+export type CardEntry = {
+  product: Product
+  verdict: PriceVerdict
+  affiliateUrl: string
+  platform: PlatformBadge
+}
+
+/** 把多個商品組成可左右滑動的 Carousel */
 export function buildCarousel(
-  entries: { item: ShopeeItem; verdict: PriceVerdict; affiliateUrl: string }[],
+  entries: CardEntry[],
   keyword: string
 ): Extract<LineMessage, { type: "flex" }> {
   const limited = entries.slice(0, MAX_CAROUSEL_ITEMS)
@@ -55,36 +63,35 @@ export function buildCarousel(
     altText: `「${keyword}」的搜尋結果（${limited.length} 筆）`,
     contents: {
       type: "carousel",
-      contents: limited.map((e) => buildBubble(e.item, e.verdict, e.affiliateUrl)),
+      contents: limited.map(buildBubble),
     },
   }
 }
 
 /** 產生單一商品卡片 Flex Message */
-export function buildItemFlex(
-  item: ShopeeItem,
-  verdict: PriceVerdict,
-  affiliateUrl: string
-): Extract<LineMessage, { type: "flex" }> {
+export function buildItemFlex(entry: CardEntry): Extract<LineMessage, { type: "flex" }> {
   return {
     type: "flex",
     // 未支援 Flex 的環境（例如舊版 LINE、通知列）只看得到 altText
-    altText: `${item.title} — $${formatPrice(item.currentPrice)}`,
-    contents: buildBubble(item, verdict, affiliateUrl),
+    altText: `${entry.product.title} — $${formatPrice(entry.product.currentPrice)}`,
+    contents: buildBubble(entry),
   }
 }
 
 /** 單一商品的 bubble。單張卡片與 Carousel 共用同一份樣式 */
-function buildBubble(item: ShopeeItem, verdict: PriceVerdict, affiliateUrl: string) {
+function buildBubble(entry: CardEntry) {
+  const { product, verdict, affiliateUrl, platform } = entry
   const badge = badgeFor(verdict)
   const discount =
-    item.originalPrice !== null ? discountPercent(item.currentPrice, item.originalPrice) : 0
+    product.originalPrice !== null
+      ? discountPercent(product.currentPrice, product.originalPrice)
+      : 0
 
   // 價格區：現價一定顯示；原價與折扣只在有原價且確實有折扣時才顯示
   const priceRow: unknown[] = [
     {
       type: "text",
-      text: `$${formatPrice(item.currentPrice)}`,
+      text: `$${formatPrice(product.currentPrice)}`,
       size: "xl",
       weight: "bold",
       color: TEXT_PRIMARY,
@@ -92,10 +99,10 @@ function buildBubble(item: ShopeeItem, verdict: PriceVerdict, affiliateUrl: stri
     },
   ]
 
-  if (item.originalPrice !== null && discount > 0) {
+  if (product.originalPrice !== null && discount > 0) {
     priceRow.push({
       type: "text",
-      text: `$${formatPrice(item.originalPrice)}`,
+      text: `$${formatPrice(product.originalPrice)}`,
       size: "sm",
       color: "#9AA5B1",
       decoration: "line-through",
@@ -120,10 +127,9 @@ function buildBubble(item: ShopeeItem, verdict: PriceVerdict, affiliateUrl: stri
     size: "kilo",
     hero: {
       type: "image",
-      url: item.imageUrl,
+      url: product.imageUrl,
       size: "full",
-      // 正方形。蝦皮商品圖本身就是 1:1，用其他比例會裁掉商品主體。
-      // 卡片寬度是 kilo（窄一級），所以正方形圖不會像滿版時那麼佔高度
+      // 電商商品圖多為正方形，用其他比例會裁掉商品主體
       aspectRatio: "1:1",
       aspectMode: "cover",
     },
@@ -133,6 +139,29 @@ function buildBubble(item: ShopeeItem, verdict: PriceVerdict, affiliateUrl: stri
       spacing: "sm",
       paddingAll: "12px",
       contents: [
+        // 平台標籤：品牌色的小圓點 + 平台名稱。
+        // 使用者一眼知道是哪家，但卡片不會變成該平台的廣告
+        {
+          type: "box",
+          layout: "baseline",
+          spacing: "xs",
+          contents: [
+            {
+              type: "text",
+              text: "●",
+              size: "xxs",
+              color: platform.brandColor,
+              flex: 0,
+            },
+            {
+              type: "text",
+              text: platform.displayName,
+              size: "xxs",
+              color: TEXT_MUTED,
+              weight: "bold",
+            },
+          ],
+        },
         {
           type: "text",
           text: badge.text,
@@ -142,7 +171,7 @@ function buildBubble(item: ShopeeItem, verdict: PriceVerdict, affiliateUrl: stri
         },
         {
           type: "text",
-          text: item.title,
+          text: product.title,
           weight: "bold",
           size: "md",
           wrap: true,
@@ -170,8 +199,8 @@ function buildBubble(item: ShopeeItem, verdict: PriceVerdict, affiliateUrl: stri
           height: "sm",
           action: {
             type: "uri",
-            // 「查看」而非「購買」——決定權在使用者，機器人只提供資訊
-            label: "在蝦皮查看",
+            // 「前往」而非「購買」——決定權在使用者，機器人只提供資訊
+            label: `前往${platform.displayName}`,
             uri: affiliateUrl,
           },
         },

@@ -12,28 +12,33 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-/// 已觀測過的蝦皮商品
+/// 已觀測過的商品。
 ///
-/// 價格一律以「分」為單位的整數儲存（例如 NT$299 存成 29900），
-/// 避免浮點數運算誤差。顯示時才除以 100。
-model Item {
-  shopId BigInt
-  itemId BigInt
+/// 刻意不綁定特定電商平台：主鍵是 (platform, externalId)，
+/// 而非蝦皮專屬的 (shopId, itemId)。不同平台的商品 ID 可能撞號，
+/// 若不帶 platform，momo 的商品會蓋掉蝦皮同號的商品。
+///
+/// 價格一律以「分」為單位的整數儲存（NT$299 → 29900），避免浮點誤差。
+model Product {
+  /// 平台代號，例如 "shopee"、"momo"
+  platform String
+  /// 該平台內可唯一識別商品的字串。
+  /// 蝦皮為 "{shopId}.{itemId}"；其他平台格式由各自的 provider 決定
+  externalId String
 
   title    String
   imageUrl String
+  /// 商品原始網址（未加分潤參數），用於重新產生連結
+  productUrl String
 
-  /// 最近一次觀測到的價格
-  currentPrice Int
-  /// 原價（劃線價）。蝦皮不一定提供，故可為空
+  currentPrice  Int
   originalPrice Int?
-  /// 本系統觀測到的歷史最低價
+  /// 本系統觀測到的最低價
   lowestPrice Int
 
-  /// 首次收錄時間。用於判定「是否為首次觀測」，
-  /// 首次觀測時 lowestPrice 必然等於 currentPrice，不可宣稱為歷史最低
+  /// 首次收錄時間。首次觀測時最低價必然等於現價，不可宣稱為歷史最低
   firstSeenAt DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  @@id([shopId, itemId])
+  @@id([platform, externalId])
 }
