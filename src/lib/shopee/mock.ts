@@ -24,6 +24,32 @@ export class MockShopeeProvider implements ShopeeProvider {
     }
   }
 
+  /**
+   * Mock 搜尋：依關鍵字產生固定數量的假商品。
+   *
+   * itemId 由關鍵字雜湊而來，所以同一個關鍵字每次搜尋都會得到同一批商品，
+   * 才能測出「搜尋到的商品再被貼一次連結」時的比價行為。
+   */
+  async searchItems(keyword: string, limit: number): Promise<ShopeeItem[]> {
+    if (!keyword.trim()) return []
+
+    // 簡單的字串雜湊，讓相同關鍵字產生相同結果
+    let hash = 0
+    for (const char of keyword) {
+      hash = (hash * 31 + char.codePointAt(0)!) % 1_000_000
+    }
+
+    const results: ShopeeItem[] = []
+    for (let i = 0; i < limit; i++) {
+      const itemId = BigInt(hash + i * 7919)
+      const item = await this.getItem(BigInt(88_000 + i), itemId)
+      if (item) {
+        results.push({ ...item, title: `【測試】${keyword} 相關商品 ${i + 1}` })
+      }
+    }
+    return results
+  }
+
   async generateAffiliateLink(originalUrl: string): Promise<string> {
     // 加上可辨識的追蹤參數，代表「這是分潤連結」
     const url = new URL(originalUrl)

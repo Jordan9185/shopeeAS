@@ -11,7 +11,24 @@ export type LineSource =
   | { type: "group"; groupId: string; userId?: string }
   | { type: "room"; roomId: string; userId?: string }
 
-export type LineTextMessage = { type: "text"; id: string; text: string }
+/** 訊息中被 @ 標註的對象 */
+export type LineMentionee = {
+  /** 在 text 中的起始位置（UTF-16 單位） */
+  index: number
+  /** 標註文字的長度 */
+  length: number
+  type?: string
+  userId?: string
+  /** 這個標註是否指向本機器人。較新版 LINE API 才有，舊版需用 userId 比對 */
+  isSelf?: boolean
+}
+
+export type LineTextMessage = {
+  type: "text"
+  id: string
+  text: string
+  mention?: { mentionees: LineMentionee[] }
+}
 /** 貼圖、圖片、影片等，本機器人不處理 */
 export type LineNonTextMessage = { type: string; id: string }
 

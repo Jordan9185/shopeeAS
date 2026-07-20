@@ -1,6 +1,7 @@
 import { recordObservation } from "@/lib/db/items"
 import { replyMessage } from "@/lib/line/client"
-import { buildItemFlex } from "@/lib/line/flex"
+import { buildCarousel, buildItemFlex } from "@/lib/line/flex"
+import { extractMentionQuery } from "@/lib/line/mention"
 import { isTextMessageEvent, type LineWebhookBody, type LineWebhookEvent } from "@/lib/line/types"
 import { verifyLineSignature } from "@/lib/line/verify"
 import { buildShopeeUrl, getShopeeProvider } from "@/lib/shopee/provider"
@@ -48,8 +49,16 @@ async function handleEvent(event: LineWebhookEvent): Promise<void> {
     // 目前只處理文字訊息。join / follow / sticker 等一律略過。
     if (!isTextMessageEvent(event)) return
 
+    // 分支一：被 @ 標註 → 關鍵字搜尋
+    const query = extractMentionQuery(event.message)
+    if (query !== null) {
+      await handleSearch(event.replyToken, query)
+      return
+    }
+
+    // 分支二：訊息含蝦皮商品連結 → 單張商品卡
     const ids = await resolveShopeeIdsFromText(event.message.text)
-    // 訊息沒有蝦皮商品連結——靜默略過。
+    // 兩者皆非——靜默略過。
     // 群組中話多的機器人會被踢，寧可少回也不要洗頻。
     if (!ids) return
 
@@ -72,4 +81,40 @@ async function handleEvent(event: LineWebhookEvent): Promise<void> {
     // 這裡吞掉例外是刻意的：單一事件失敗不該讓整個 webhook 回 500
     console.error("[webhook] 處理事件時發生錯誤:", error)
   }
+}
+
+/** 一次搜尋回傳幾筆商品 */
+const SEARCH_LIMIT = 5
+
+/**
+ * 處理關鍵字搜尋。
+ *
+ * 這條路徑一定是使用者主動 @ 觸發的，所以「查無結果」時**要**回覆——
+ * 使用者明確問了問題卻毫無反應，會讓人以為機器人壞了。
+ * 這與「沒被 @ 就靜默」並不衝突：前者是回應提問，後者是不主動插話。
+ */
+async function handleSearch(replyToken: string, query: string): Promise<void> {
+  if (!query) {
+    await replyMessage(replyToken, [{ type: "text", text: "想找什麼商品呢？例如：@我 降噪耳機" }])
+    return
+  }
+
+  const provider = getShopeeProvider()
+  const items = await provider.searchItems(query, SEARCH_LIMIT)
+
+  if (items.length === 0) {
+    await replyMessage(replyToken, [{ type: "text", text: `找不到「${query}」的相關商品` }])
+    return
+  }
+
+  // 每筆結果都記錄觀測，讓之後有人貼這些商品的連結時已有價格歷史
+  const entries = await Promise.all(
+    items.map(async (item) => ({
+      item,
+      verdict: await recordObservation(item),
+      affiliateUrl: await provider.generateAffiliateLink(buildShopeeUrl(item.shopId, item.itemId)),
+    }))
+  )
+
+  await replyMessage(replyToken, [buildCarousel(entries, query)])
 }

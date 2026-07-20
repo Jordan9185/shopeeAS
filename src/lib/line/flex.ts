@@ -36,12 +36,46 @@ function badgeFor(verdict: PriceVerdict): Badge {
   }
 }
 
-/** 產生商品卡片 Flex Message */
+/** LINE Carousel 上限為 12 個 bubble，但太多會讓使用者滑不完 */
+const MAX_CAROUSEL_ITEMS = 10
+
+/**
+ * 把多個商品組成可左右滑動的 Carousel。
+ *
+ * @param entries 每筆包含商品、比價判定與分潤連結
+ */
+export function buildCarousel(
+  entries: { item: ShopeeItem; verdict: PriceVerdict; affiliateUrl: string }[],
+  keyword: string
+): Extract<LineMessage, { type: "flex" }> {
+  const limited = entries.slice(0, MAX_CAROUSEL_ITEMS)
+
+  return {
+    type: "flex",
+    altText: `「${keyword}」的搜尋結果（${limited.length} 筆）`,
+    contents: {
+      type: "carousel",
+      contents: limited.map((e) => buildBubble(e.item, e.verdict, e.affiliateUrl)),
+    },
+  }
+}
+
+/** 產生單一商品卡片 Flex Message */
 export function buildItemFlex(
   item: ShopeeItem,
   verdict: PriceVerdict,
   affiliateUrl: string
 ): Extract<LineMessage, { type: "flex" }> {
+  return {
+    type: "flex",
+    // 未支援 Flex 的環境（例如舊版 LINE、通知列）只看得到 altText
+    altText: `${item.title} — $${formatPrice(item.currentPrice)}`,
+    contents: buildBubble(item, verdict, affiliateUrl),
+  }
+}
+
+/** 單一商品的 bubble。單張卡片與 Carousel 共用同一份樣式 */
+function buildBubble(item: ShopeeItem, verdict: PriceVerdict, affiliateUrl: string) {
   const badge = badgeFor(verdict)
   const discount =
     item.originalPrice !== null ? discountPercent(item.currentPrice, item.originalPrice) : 0
@@ -81,72 +115,67 @@ export function buildItemFlex(
   }
 
   return {
-    type: "flex",
-    // 未支援 Flex 的環境（例如舊版 LINE、通知列）只看得到 altText
-    altText: `${item.title} — $${formatPrice(item.currentPrice)}`,
-    contents: {
-      type: "bubble",
-      // kilo 比預設的 mega 窄一級，在群組裡不會佔掉整個畫面寬度
-      size: "kilo",
-      hero: {
-        type: "image",
-        url: item.imageUrl,
-        size: "full",
-        // 用 20:13 而非 1:1。正方形圖在手機上很吃高度，
-        // 而商品縮圖的重點是辨識，不需要完整呈現整張圖
-        aspectRatio: "20:13",
-        aspectMode: "cover",
-      },
-      body: {
-        type: "box",
-        layout: "vertical",
-        spacing: "sm",
-        paddingAll: "12px",
-        contents: [
-          {
-            type: "text",
-            text: badge.text,
-            size: "xs",
-            weight: "bold",
-            color: badge.color,
+    type: "bubble",
+    // kilo 比預設的 mega 窄一級，在群組裡不會佔掉整個畫面寬度
+    size: "kilo",
+    hero: {
+      type: "image",
+      url: item.imageUrl,
+      size: "full",
+      // 用 20:13 而非 1:1。正方形圖在手機上很吃高度，
+      // 而商品縮圖的重點是辨識，不需要完整呈現整張圖
+      aspectRatio: "20:13",
+      aspectMode: "cover",
+    },
+    body: {
+      type: "box",
+      layout: "vertical",
+      spacing: "sm",
+      paddingAll: "12px",
+      contents: [
+        {
+          type: "text",
+          text: badge.text,
+          size: "xs",
+          weight: "bold",
+          color: badge.color,
+        },
+        {
+          type: "text",
+          text: item.title,
+          weight: "bold",
+          size: "md",
+          wrap: true,
+          maxLines: 2,
+        },
+        {
+          type: "box",
+          layout: "baseline",
+          spacing: "sm",
+          contents: priceRow,
+        },
+      ],
+    },
+    footer: {
+      type: "box",
+      layout: "vertical",
+      paddingAll: "12px",
+      paddingTop: "0px",
+      contents: [
+        {
+          type: "button",
+          // secondary 而非 primary：不強調、不誘導點擊
+          style: "secondary",
+          color: BUTTON_COLOR,
+          height: "sm",
+          action: {
+            type: "uri",
+            // 「查看」而非「購買」——決定權在使用者，機器人只提供資訊
+            label: "在蝦皮查看",
+            uri: affiliateUrl,
           },
-          {
-            type: "text",
-            text: item.title,
-            weight: "bold",
-            size: "md",
-            wrap: true,
-            maxLines: 2,
-          },
-          {
-            type: "box",
-            layout: "baseline",
-            spacing: "sm",
-            contents: priceRow,
-          },
-        ],
-      },
-      footer: {
-        type: "box",
-        layout: "vertical",
-        paddingAll: "12px",
-        paddingTop: "0px",
-        contents: [
-          {
-            type: "button",
-            // secondary 而非 primary：不強調、不誘導點擊
-            style: "secondary",
-            color: BUTTON_COLOR,
-            height: "sm",
-            action: {
-              type: "uri",
-              // 「查看」而非「購買」——決定權在使用者，機器人只提供資訊
-              label: "在蝦皮查看",
-              uri: affiliateUrl,
-            },
-          },
-        ],
-      },
+        },
+      ],
     },
   }
 }
