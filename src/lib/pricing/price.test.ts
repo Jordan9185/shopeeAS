@@ -1,5 +1,42 @@
 import { describe, expect, it } from "vitest"
-import { formatPrice, judgePrice } from "./price"
+import { formatPrice, judgePrice, parsePriceToCents } from "./price"
+
+describe("parsePriceToCents", () => {
+  it("整數價格", () => {
+    expect(parsePriceToCents("299")).toBe(29900)
+    expect(parsePriceToCents(299)).toBe(29900)
+  })
+
+  it("兩位小數", () => {
+    expect(parsePriceToCents("299.00")).toBe(29900)
+    expect(parsePriceToCents("299.50")).toBe(29950)
+  })
+
+  it("一位小數要補零", () => {
+    expect(parsePriceToCents("299.5")).toBe(29950)
+  })
+
+  it("超過兩位小數要截斷", () => {
+    expect(parsePriceToCents("299.999")).toBe(29999)
+  })
+
+  it("避開浮點誤差", () => {
+    // 19.99 * 100 在 JS 中是 1998.9999999999998
+    expect(parsePriceToCents("19.99")).toBe(1999)
+    expect(parsePriceToCents("1234567.89")).toBe(123456789)
+  })
+
+  it("無法解析回 null，不可回 NaN", () => {
+    for (const bad of ["", "abc", "-5", "1.2.3", null, undefined]) {
+      expect(parsePriceToCents(bad)).toBeNull()
+    }
+  })
+
+  it("零元", () => {
+    expect(parsePriceToCents("0")).toBe(0)
+    expect(parsePriceToCents("0.00")).toBe(0)
+  })
+})
 
 describe("judgePrice", () => {
   it("首次收錄不可宣稱為歷史最低", () => {

@@ -47,6 +47,27 @@ export function formatPrice(cents: number): string {
   return Math.round(cents / 100).toLocaleString("en-US")
 }
 
+/**
+ * 把電商 API 回傳的價格字串（例如 "299.00"）轉成「分」的整數。
+ *
+ * 刻意不用 `Math.round(parseFloat(s) * 100)`：浮點乘法會有誤差，
+ * 例如 `19.99 * 100 === 1998.9999999999998`，四捨五入雖然多半正確，
+ * 但在某些數值會差一分。改用字串拆解小數點，完全避開浮點運算。
+ *
+ * @returns 分為單位的整數；無法解析回 null
+ */
+export function parsePriceToCents(raw: string | number | null | undefined): number | null {
+  if (raw === null || raw === undefined) return null
+
+  const text = String(raw).trim()
+  if (!/^\d+(\.\d+)?$/.test(text)) return null
+
+  const [whole, fraction = ""] = text.split(".")
+  // 補足或截斷到兩位小數
+  const cents = `${fraction}00`.slice(0, 2)
+  return Number(whole) * 100 + Number(cents)
+}
+
 /** 計算折扣百分比，例如原價 1000 現價 700 → 30（代表折 30%） */
 export function discountPercent(currentPrice: number, originalPrice: number): number {
   if (originalPrice <= 0 || currentPrice >= originalPrice) return 0

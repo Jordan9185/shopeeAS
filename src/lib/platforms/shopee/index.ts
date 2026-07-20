@@ -1,44 +1,8 @@
-import type { AffiliateProvider, Product } from "../types"
-import { followRedirects } from "../url"
-import {
-  buildShopeeUrl,
-  fromExternalId,
-  isShopeeUrl,
-  isShortLink,
-  parseShopeeIds,
-  toExternalId,
-} from "./url"
+import type { Product } from "../types"
+import { ShopeeProviderBase } from "./base"
+import { buildShopeeUrl, fromExternalId } from "./url"
 
-/** 蝦皮平台的共通屬性，Mock 與正式實作共用 */
-const SHOPEE_META = {
-  platform: "shopee",
-  displayName: "蝦皮購物",
-  brandColor: "#EE4D2D",
-} as const
-
-/** 網址解析行為與資料來源無關，Mock 與正式實作共用這一份 */
-abstract class ShopeeProviderBase implements AffiliateProvider {
-  readonly platform = SHOPEE_META.platform
-  readonly displayName = SHOPEE_META.displayName
-  readonly brandColor = SHOPEE_META.brandColor
-
-  matchesUrl(url: string): boolean {
-    return isShopeeUrl(url)
-  }
-
-  parseUrl(url: string): string | null {
-    const ids = parseShopeeIds(url)
-    return ids ? toExternalId(ids) : null
-  }
-
-  async expandUrl(url: string): Promise<string | null> {
-    return isShortLink(url) ? followRedirects(url) : url
-  }
-
-  abstract getProduct(externalId: string): Promise<Product | null>
-  abstract searchProducts(keyword: string, limit: number): Promise<Product[]>
-  abstract generateAffiliateLink(productUrl: string): Promise<string>
-}
+export { ShopeeAffiliateProvider } from "./affiliate"
 
 /**
  * Mock 實作，供蝦皮聯盟 API 審核通過前開發使用。
