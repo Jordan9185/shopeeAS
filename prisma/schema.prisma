@@ -1,0 +1,39 @@
+// shopee-line-bot — Prisma schema
+// 設計文件：docs/superpowers/specs/2026-07-20-shopee-line-bot-design.md
+
+generator client {
+  provider      = "prisma-client-js"
+  // rhel-openssl-3.0.x 是 Vercel serverless 執行環境需要的 binary target
+  binaryTargets = ["native", "rhel-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/// 已觀測過的蝦皮商品
+///
+/// 價格一律以「分」為單位的整數儲存（例如 NT$299 存成 29900），
+/// 避免浮點數運算誤差。顯示時才除以 100。
+model Item {
+  shopId BigInt
+  itemId BigInt
+
+  title    String
+  imageUrl String
+
+  /// 最近一次觀測到的價格
+  currentPrice Int
+  /// 原價（劃線價）。蝦皮不一定提供，故可為空
+  originalPrice Int?
+  /// 本系統觀測到的歷史最低價
+  lowestPrice Int
+
+  /// 首次收錄時間。用於判定「是否為首次觀測」，
+  /// 首次觀測時 lowestPrice 必然等於 currentPrice，不可宣稱為歷史最低
+  firstSeenAt DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@id([shopId, itemId])
+}
