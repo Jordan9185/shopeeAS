@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import type { Product } from "@/lib/platforms/types"
 import type { PriceVerdict } from "@/lib/pricing/price"
-import { buildCarousel, buildItemFlex, type CardEntry } from "./flex"
+import { buildCarousel, buildItemFlex, buildTrackedCarousel, type CardEntry } from "./flex"
 
 const PRODUCT: Product = {
   platform: "shopee",
@@ -140,5 +140,45 @@ describe("buildCarousel", () => {
     expect(text).toContain("蝦皮購物")
     expect(text).toContain("momo購物網")
     expect(text).toContain("#D5006D")
+  })
+})
+
+describe("buildTrackedCarousel", () => {
+  function tracked(currentPrice: number, priceAtTrack: number) {
+    return {
+      product: { ...PRODUCT, currentPrice, originalPrice: null },
+      priceAtTrack,
+      affiliateUrl: AFF_URL,
+      platform: SHOPEE_BADGE,
+    }
+  }
+
+  it("降價時顯示降幅與百分比", () => {
+    // 29900 → 25000，降 4900 分 = 49 元，約 16%
+    const text = JSON.stringify(buildTrackedCarousel([tracked(25000, 29900)]))
+    expect(text).toContain("追蹤後降")
+    expect(text).toContain("49")
+    expect(text).toContain("16%")
+  })
+
+  it("漲價時據實顯示，不可假裝沒漲", () => {
+    const text = JSON.stringify(buildTrackedCarousel([tracked(35000, 29900)]))
+    expect(text).toContain("追蹤後漲")
+  })
+
+  it("價格未變時明確說明", () => {
+    const text = JSON.stringify(buildTrackedCarousel([tracked(29900, 29900)]))
+    expect(text).toContain("未變")
+  })
+
+  it("altText 要說明有幾個追蹤商品", () => {
+    const message = buildTrackedCarousel([tracked(25000, 29900), tracked(29900, 29900)])
+    expect(message.altText).toContain("2")
+  })
+
+  it("超過 Carousel 上限時要截斷", () => {
+    const many = Array.from({ length: 20 }, () => tracked(25000, 29900))
+    const contents = buildTrackedCarousel(many).contents as { contents: unknown[] }
+    expect(contents.contents.length).toBeLessThanOrEqual(12)
   })
 })

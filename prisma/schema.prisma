@@ -42,3 +42,23 @@ model Product {
 
   @@id([platform, externalId])
 }
+
+/// 使用者追蹤的商品。
+///
+/// 刻意不做主動推播：LINE 的推播訊息有每月則數上限且超額要付費，
+/// 而回覆訊息免費且無上限。使用者主動詢問「我的追蹤」時才回覆清單，
+/// 成本為零。日後若要加推播，這張表就是名單來源。
+model Tracking {
+  /// LINE 的使用者 ID。同一人在不同群組追蹤的商品會合併在一起
+  lineUserId String
+  platform   String
+  externalId String
+
+  /// 加入追蹤當下的價格，用於顯示「追蹤後的變化」
+  priceAtTrack Int
+  createdAt    DateTime @default(now())
+
+  @@id([lineUserId, platform, externalId])
+  /// 日後推播時需要反查「有哪些人在追蹤這個商品」
+  @@index([platform, externalId])
+}

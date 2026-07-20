@@ -78,10 +78,64 @@ export function buildItemFlex(entry: CardEntry): Extract<LineMessage, { type: "f
   }
 }
 
-/** 單一商品的 bubble。單張卡片與 Carousel 共用同一份樣式 */
-function buildBubble(entry: CardEntry) {
+/** 追蹤清單中的一筆。標籤顯示的是「加入追蹤後的價格變化」而非比價判定 */
+export type TrackedEntry = {
+  product: Product
+  /** 加入追蹤當下的價格 */
+  priceAtTrack: number
+  affiliateUrl: string
+  platform: PlatformBadge
+}
+
+/**
+ * 依「追蹤後的價格變化」決定標籤。
+ *
+ * 這與 badgeFor 不同：使用者關心的是「我追蹤之後便宜了沒」，
+ * 而不是「這在所有觀測中算不算低」。
+ */
+function trackedBadge(currentPrice: number, priceAtTrack: number): Badge {
+  const diff = currentPrice - priceAtTrack
+
+  if (diff < 0) {
+    const percent = Math.round((-diff / priceAtTrack) * 100)
+    return { text: `追蹤後降 $${formatPrice(-diff)}（${percent}%）`, color: "#2E7D5B" }
+  }
+  if (diff > 0) {
+    return { text: `追蹤後漲 $${formatPrice(diff)}`, color: TEXT_MUTED }
+  }
+  return { text: "追蹤後價格未變", color: TEXT_MUTED }
+}
+
+/** 產生「我的追蹤」清單 Carousel */
+export function buildTrackedCarousel(
+  entries: TrackedEntry[]
+): Extract<LineMessage, { type: "flex" }> {
+  const limited = entries.slice(0, MAX_CAROUSEL_ITEMS)
+
+  return {
+    type: "flex",
+    altText: `你追蹤中的 ${limited.length} 個商品`,
+    contents: {
+      type: "carousel",
+      contents: limited.map((e) =>
+        buildBubble({
+          product: e.product,
+          affiliateUrl: e.affiliateUrl,
+          platform: e.platform,
+          badge: trackedBadge(e.product.currentPrice, e.priceAtTrack),
+        })
+      ),
+    },
+  }
+}
+
+/** 單一商品的 bubble。所有卡片共用同一份樣式 */
+function buildBubble(
+  entry: Omit<CardEntry, "verdict"> & { verdict?: PriceVerdict; badge?: Badge }
+) {
   const { product, verdict, affiliateUrl, platform } = entry
-  const badge = badgeFor(verdict)
+  // 呼叫端可直接給定標籤（追蹤清單），或給比價判定由此推導（商品卡）
+  const badge = entry.badge ?? badgeFor(verdict as PriceVerdict)
   const discount =
     product.originalPrice !== null
       ? discountPercent(product.currentPrice, product.originalPrice)

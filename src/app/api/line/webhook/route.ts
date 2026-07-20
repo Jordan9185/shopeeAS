@@ -1,12 +1,26 @@
 import { recordObservation } from "@/lib/db/products"
+import { addTracking, listTracked, removeTracking } from "@/lib/db/tracking"
 import { replyMessage } from "@/lib/line/client"
-import { buildCarousel, buildItemFlex, type CardEntry } from "@/lib/line/flex"
+import {
+  buildCarousel,
+  buildItemFlex,
+  buildTrackedCarousel,
+  type CardEntry,
+  type TrackedEntry,
+} from "@/lib/line/flex"
 import { extractMentionQuery } from "@/lib/line/mention"
-import { isTextMessageEvent, type LineWebhookBody, type LineWebhookEvent } from "@/lib/line/types"
+import {
+  isTextMessageEvent,
+  type LineSource,
+  type LineWebhookBody,
+  type LineWebhookEvent,
+} from "@/lib/line/types"
 import { verifyLineSignature } from "@/lib/line/verify"
-import { allProviders } from "@/lib/platforms/registry"
+import { allProviders, providerFor } from "@/lib/platforms/registry"
 import { resolveProductFromText } from "@/lib/platforms/resolve"
 import type { AffiliateProvider, Product } from "@/lib/platforms/types"
+import { formatPrice } from "@/lib/pricing/price"
+import { parseCommand } from "@/lib/tracking/commands"
 
 // node:crypto 需要 Node runtime，不能跑在 Edge
 export const runtime = "nodejs"
@@ -50,10 +64,10 @@ async function handleEvent(event: LineWebhookEvent): Promise<void> {
     // 目前只處理文字訊息。join / follow / sticker 等一律略過。
     if (!isTextMessageEvent(event)) return
 
-    // 分支一：被 @ 標註 → 關鍵字搜尋
+    // 分支一：被 @ 標註 → 依指令處理
     const query = extractMentionQuery(event.message)
     if (query !== null) {
-      await handleSearch(event.replyToken, query)
+      await handleCommand(event.replyToken, query, event.source)
       return
     }
 
@@ -89,6 +103,135 @@ async function handleProductLink(replyToken: string, text: string): Promise<void
   }
 
   await replyMessage(replyToken, [buildItemFlex(await toCardEntry(provider, product))])
+}
+
+const HELP_TEXT = [
+  "可以這樣用我：",
+  "",
+  "・貼上商品連結 → 顯示價格資訊",
+  "・@我 關鍵字 → 搜尋商品",
+  "・@我 追蹤 商品連結 → 加入追蹤",
+  "・@我 我的追蹤 → 查看追蹤清單與價格變化",
+  "・@我 取消追蹤 商品連結 → 移除追蹤",
+].join("\n")
+
+/** 依解析出的指令分派 */
+async function handleCommand(replyToken: string, query: string, source: LineSource): Promise<void> {
+  const command = parseCommand(query)
+
+  switch (command.kind) {
+    case "help":
+      await replyMessage(replyToken, [{ type: "text", text: HELP_TEXT }])
+      return
+    case "search":
+      await handleSearch(replyToken, command.text)
+      return
+    case "track":
+      await handleTrack(replyToken, command.text, source)
+      return
+    case "untrack":
+      await handleUntrack(replyToken, command.text, source)
+      return
+    case "list":
+      await handleList(replyToken, source)
+      return
+  }
+}
+
+/**
+ * 取得發話者的 LINE userId。
+ *
+ * 群組事件中，若使用者未同意提供個人資料，`source.userId` 可能不存在。
+ * 此時無法把追蹤紀錄綁到人，只能請他改用一對一聊天。
+ */
+function userIdOf(source: LineSource): string | null {
+  return source.userId ?? null
+}
+
+const NEED_USER_ID_TEXT = "抱歉，這裡無法識別你的身分。請直接加我好友、在一對一聊天中使用追蹤功能。"
+
+async function handleTrack(replyToken: string, text: string, source: LineSource): Promise<void> {
+  const userId = userIdOf(source)
+  if (!userId) {
+    await replyMessage(replyToken, [{ type: "text", text: NEED_USER_ID_TEXT }])
+    return
+  }
+
+  const resolved = await resolveProductFromText(text)
+  if (!resolved) {
+    await replyMessage(replyToken, [
+      { type: "text", text: "請一起附上商品連結，例如：@我 追蹤 https://shopee.tw/..." },
+    ])
+    return
+  }
+
+  const product = await resolved.provider.getProduct(resolved.externalId)
+  if (!product) {
+    await replyMessage(replyToken, [{ type: "text", text: "找不到這個商品，可能已經下架了" }])
+    return
+  }
+
+  // 追蹤時一併記錄觀測，讓每日回檢排程之後會照顧到這個商品
+  await recordObservation(product)
+  const result = await addTracking(userId, product)
+
+  const message =
+    result.kind === "added"
+      ? `已加入追蹤：${product.title}\n目前 $${formatPrice(product.currentPrice)}\n用「@我 我的追蹤」查看變化`
+      : result.kind === "already_tracked"
+        ? "這個商品已經在你的追蹤清單裡了"
+        : `追蹤數量已達上限（${result.limit} 個），請先取消一些再加入`
+
+  await replyMessage(replyToken, [{ type: "text", text: message }])
+}
+
+async function handleUntrack(replyToken: string, text: string, source: LineSource): Promise<void> {
+  const userId = userIdOf(source)
+  if (!userId) {
+    await replyMessage(replyToken, [{ type: "text", text: NEED_USER_ID_TEXT }])
+    return
+  }
+
+  const resolved = await resolveProductFromText(text)
+  if (!resolved) {
+    await replyMessage(replyToken, [{ type: "text", text: "請附上要取消追蹤的商品連結" }])
+    return
+  }
+
+  const removed = await removeTracking(userId, resolved.provider.platform, resolved.externalId)
+  await replyMessage(replyToken, [
+    { type: "text", text: removed ? "已取消追蹤" : "這個商品不在你的追蹤清單裡" },
+  ])
+}
+
+async function handleList(replyToken: string, source: LineSource): Promise<void> {
+  const userId = userIdOf(source)
+  if (!userId) {
+    await replyMessage(replyToken, [{ type: "text", text: NEED_USER_ID_TEXT }])
+    return
+  }
+
+  const tracked = await listTracked(userId)
+  if (tracked.length === 0) {
+    await replyMessage(replyToken, [
+      { type: "text", text: "你還沒有追蹤任何商品。用「@我 追蹤 商品連結」加入吧" },
+    ])
+    return
+  }
+
+  const entries: TrackedEntry[] = []
+  for (const item of tracked) {
+    const provider = providerFor(item.product.platform)
+    if (!provider) continue
+    entries.push({
+      product: item.product,
+      priceAtTrack: item.priceAtTrack,
+      affiliateUrl: await provider.generateAffiliateLink(item.product.productUrl),
+      platform: { displayName: provider.displayName, brandColor: provider.brandColor },
+    })
+  }
+
+  await replyMessage(replyToken, [buildTrackedCarousel(entries)])
 }
 
 /** 一次搜尋回傳幾筆商品 */
