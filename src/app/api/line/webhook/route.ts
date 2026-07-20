@@ -1,6 +1,10 @@
+import { recordObservation } from "@/lib/db/items"
 import { replyMessage } from "@/lib/line/client"
+import { buildItemFlex } from "@/lib/line/flex"
 import { isTextMessageEvent, type LineWebhookBody, type LineWebhookEvent } from "@/lib/line/types"
 import { verifyLineSignature } from "@/lib/line/verify"
+import { buildShopeeUrl, getShopeeProvider } from "@/lib/shopee/provider"
+import { resolveShopeeIdsFromText } from "@/lib/shopee/url"
 
 // node:crypto 需要 Node runtime，不能跑在 Edge
 export const runtime = "nodejs"
@@ -44,11 +48,26 @@ async function handleEvent(event: LineWebhookEvent): Promise<void> {
     // 目前只處理文字訊息。join / follow / sticker 等一律略過。
     if (!isTextMessageEvent(event)) return
 
-    const text = event.message.text.trim()
+    const ids = await resolveShopeeIdsFromText(event.message.text)
+    // 訊息沒有蝦皮商品連結——靜默略過。
+    // 群組中話多的機器人會被踢，寧可少回也不要洗頻。
+    if (!ids) return
 
-    // TODO(第 3 階段): 換成蝦皮網址解析 → 商品查詢 → Flex 卡片
-    // 現在先回聲，用途是驗證整條管線（LINE → Vercel → 驗簽 → 回覆）是否暢通
-    await replyMessage(event.replyToken, [{ type: "text", text }])
+    const provider = getShopeeProvider()
+    const item = await provider.getItem(ids.shopId, ids.itemId)
+    if (!item) {
+      console.warn(`[webhook] 查不到商品 shop=${ids.shopId} item=${ids.itemId}`)
+      return
+    }
+
+    // 寫入觀測紀錄並取得比價判定
+    const verdict = await recordObservation(item)
+
+    // 分潤連結失敗時 provider 會退回原始網址，使用者至少拿得到能用的連結
+    const originalUrl = buildShopeeUrl(item.shopId, item.itemId)
+    const affiliateUrl = await provider.generateAffiliateLink(originalUrl)
+
+    await replyMessage(event.replyToken, [buildItemFlex(item, verdict, affiliateUrl)])
   } catch (error) {
     // 這裡吞掉例外是刻意的：單一事件失敗不該讓整個 webhook 回 500
     console.error("[webhook] 處理事件時發生錯誤:", error)
