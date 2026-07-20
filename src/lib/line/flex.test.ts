@@ -32,21 +32,36 @@ describe("buildItemFlex", () => {
     expect(flatten(buildItemFlex(ITEM, verdict, AFF_URL))).toContain("aff_mock=1")
   })
 
-  it("首次收錄不可出現「歷史最低」字樣", () => {
+  it("首次收錄不可出現任何「最低價」宣稱", () => {
     const verdict: PriceVerdict = { kind: "first_seen", newLowest: 29900 }
     const text = flatten(buildItemFlex(ITEM, verdict, AFF_URL))
     expect(text).toContain("首次收錄")
-    expect(text).not.toContain("歷史新低")
+    expect(text).not.toContain("最低")
   })
 
-  it("歷史新低要標示出來", () => {
+  it("觀測以來的最低價要標示出來", () => {
     const verdict: PriceVerdict = { kind: "new_low", newLowest: 25000 }
-    expect(flatten(buildItemFlex(ITEM, verdict, AFF_URL))).toContain("歷史新低")
+    expect(flatten(buildItemFlex(ITEM, verdict, AFF_URL))).toContain("最低")
   })
 
-  it("追平歷史最低要標示出來", () => {
+  it("與最低價相同時要標示出來", () => {
     const verdict: PriceVerdict = { kind: "tie_low", newLowest: 29900 }
-    expect(flatten(buildItemFlex(ITEM, verdict, AFF_URL))).toContain("追平")
+    expect(flatten(buildItemFlex(ITEM, verdict, AFF_URL))).toContain("相同")
+  })
+
+  it("文案不可含煽動性字眼或推銷 emoji", () => {
+    const verdicts: PriceVerdict[] = [
+      { kind: "first_seen", newLowest: 29900 },
+      { kind: "new_low", newLowest: 25000 },
+      { kind: "tie_low", newLowest: 29900 },
+      { kind: "above_low", newLowest: 25000, gapFromLowest: 4900 },
+    ]
+    for (const verdict of verdicts) {
+      const text = flatten(buildItemFlex(ITEM, verdict, AFF_URL))
+      for (const banned of ["🔥", "快搶", "限時", "必買", "手刀", "錯過"]) {
+        expect(text).not.toContain(banned)
+      }
+    }
   })
 
   it("高於歷史低點要顯示差距金額", () => {

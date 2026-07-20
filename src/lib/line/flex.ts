@@ -2,27 +2,37 @@ import { discountPercent, formatPrice, type PriceVerdict } from "@/lib/shopee/pr
 import type { ShopeeItem } from "@/lib/shopee/types"
 import type { LineMessage } from "./client"
 
-/** 蝦皮品牌橘，用在主要按鈕 */
-const SHOPEE_ORANGE = "#EE4D2D"
+// 刻意不使用蝦皮品牌橘。高飽和的橘色會讓卡片看起來像廣告，
+// 中性的深藍灰更像「資訊卡片」，由使用者自行判斷要不要買。
+const TEXT_PRIMARY = "#1F2933"
+const TEXT_MUTED = "#7B8794"
+const BUTTON_COLOR = "#3E4C59"
 
 type Badge = { text: string; color: string }
 
 /**
  * 依比價結果決定標籤文字與顏色。
  *
- * 首次收錄刻意用中性的灰色與「首次收錄」字樣——此時沒有任何歷史可比，
- * 用紅色或「最低價」會讓使用者誤以為現在是好時機。
+ * 文案原則：只陳述觀測到的事實，不做價值判斷、不催促。
+ * 「目前是觀測以來的最低價」是事實；「🔥 歷史新低！快搶」是推銷。
+ * 後者會讓使用者感覺被推著走，長期反而損害信任。
+ *
+ * 措辭一律加上「觀測以來」的限定，因為本系統只看得到自己記錄過的價格，
+ * 不等於這個商品真正的歷史最低價——不加限定就是誇大。
  */
 function badgeFor(verdict: PriceVerdict): Badge {
   switch (verdict.kind) {
     case "new_low":
-      return { text: "🔥 歷史新低", color: "#D0021B" }
+      return { text: "目前是觀測以來的最低價", color: "#2E7D5B" }
     case "tie_low":
-      return { text: "≡ 追平歷史最低", color: "#F5A623" }
+      return { text: "與觀測到的最低價相同", color: TEXT_MUTED }
     case "above_low":
-      return { text: `距歷史低點 +$${formatPrice(verdict.gapFromLowest)}`, color: "#7B8794" }
+      return {
+        text: `高於觀測到的最低價 $${formatPrice(verdict.gapFromLowest)}`,
+        color: TEXT_MUTED,
+      }
     case "first_seen":
-      return { text: "首次收錄，開始追蹤價格", color: "#7B8794" }
+      return { text: "首次收錄，開始記錄價格", color: TEXT_MUTED }
   }
 }
 
@@ -43,7 +53,7 @@ export function buildItemFlex(
       text: `$${formatPrice(item.currentPrice)}`,
       size: "xl",
       weight: "bold",
-      color: SHOPEE_ORANGE,
+      color: TEXT_PRIMARY,
       flex: 0,
     },
   ]
@@ -61,10 +71,10 @@ export function buildItemFlex(
     })
     priceRow.push({
       type: "text",
-      text: `${discount}%off`,
+      // 折扣用中性灰而非紅色。紅色數字是廣告語彙，會催促決策
+      text: `較原價少 ${discount}%`,
       size: "sm",
-      color: "#D0021B",
-      weight: "bold",
+      color: TEXT_MUTED,
       gravity: "bottom",
       margin: "sm",
     })
@@ -124,12 +134,14 @@ export function buildItemFlex(
         contents: [
           {
             type: "button",
-            style: "primary",
-            color: SHOPEE_ORANGE,
+            // secondary 而非 primary：不強調、不誘導點擊
+            style: "secondary",
+            color: BUTTON_COLOR,
             height: "sm",
             action: {
               type: "uri",
-              label: "前往蝦皮購買",
+              // 「查看」而非「購買」——決定權在使用者，機器人只提供資訊
+              label: "在蝦皮查看",
               uri: affiliateUrl,
             },
           },
