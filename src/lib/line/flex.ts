@@ -122,9 +122,9 @@ function buildBubble(item: ShopeeItem, verdict: PriceVerdict, affiliateUrl: stri
       type: "image",
       url: item.imageUrl,
       size: "full",
-      // 用 20:13 而非 1:1。正方形圖在手機上很吃高度，
-      // 而商品縮圖的重點是辨識，不需要完整呈現整張圖
-      aspectRatio: "20:13",
+      // 正方形。蝦皮商品圖本身就是 1:1，用其他比例會裁掉商品主體。
+      // 卡片寬度是 kilo（窄一級），所以正方形圖不會像滿版時那麼佔高度
+      aspectRatio: "1:1",
       aspectMode: "cover",
     },
     body: {
