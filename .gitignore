@@ -26,3 +26,5 @@ coverage/
 .DS_Store
 *.log
 .env*
+# 但範本檔要進 git（不含任何真實金鑰）
+!.env.example
